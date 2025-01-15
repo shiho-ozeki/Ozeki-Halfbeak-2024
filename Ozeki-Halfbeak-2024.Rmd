@@ -1,0 +1,1491 @@
+---
+title: "Ozeki-Halfbeak-2024"
+output: html_document
+date: "2025-01-15"
+---
+
+# Cleaned data wrangling
+```{r}
+# Load Required Packages
+required_packages <- c(
+  "tidyverse", "ggplot2", "dplyr", "readxl", "lme4", "sjPlot", "stringr",
+  "lubridate", "corrplot", "janitor", "reshape2"
+)
+
+install_load <- function(packages) {
+  lapply(packages, function(package) {
+    if (!require(package, character.only = TRUE)) {
+      install.packages(package)
+      library(package, character.only = TRUE)
+    }
+  })
+  cat("All packages loaded successfully.\n")
+}
+install_load(required_packages)
+```
+# Step 1: Sperm Velocity (CASA) Data Processing
+```{r}
+# Set path and load files 
+# Define the correct path for macOS
+path <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA"
+
+# Normalize the path to correct format
+path <- normalizePath(path)
+
+# Check if the path exists and set the working directory
+if (file.exists(path)) {
+  setwd(path)
+  print(getwd())  # This should print the new working directory if successful
+} else {
+  stop("The specified path does not exist. Please check the path.")
+}
+
+# Now list the Excel files using the normalized path
+excel_files <- list.files(path = path, pattern = ".xls", full.names = TRUE)
+```
+
+```{r}
+# Function to process excel files 
+data_l <- list()
+
+process <- function (file) {
+  file_data <- read_excel(excel_files[file], col_names = FALSE)                        # Read the first file in the folder
+  file_name <- basename(excel_files[file])                                             # Keep track of the name of the file   
+  file_data <- file_data[-c(1:3),]                                                     # Delete the three first useless rows
+  colnames(file_data) <- file_data[1, ]                                                # Change the names of the columns based on the first row
+  file_data <- file_data[-1, ]                                                         # Delete it
+  file_data$ID <- file_name                                                            # Add the name as a variable    
+  return(file_data)
+}
+```
+
+```{r}
+j=0
+for (file in 1:length(excel_files)) {                                                  # Apply the "process" function to each file in the folder
+  j=j+1
+  data_l[[j]] <- process(file)
+}
+```
+
+```{r}
+data <- bind_rows(data_l)                                                              # Bind all the files together
+data <- as.data.frame(data[,c(23,1,7:16)])                                             # Convert into a dataframe and select the variables I am interested in
+data$ID <- substr(data$ID, 1, nchar(data$ID) - 4)                                      # Delete the last 4 characters so ".xls"
+data$ID <- sub(sprintf('([A-Z])([0-9])'), "\\1.\\2", data$ID)                          # Change IDs to correct format
+```
+
+```{r}
+# Change the class of characters
+data$Field <- as.character(data$Field)
+data$VCL <- as.numeric(data$VCL);data$VSL <- as.numeric(data$VSL);data$VAP <- as.numeric(data$VAP)
+data$LIN <- as.numeric(data$LIN);data$STR <- as.numeric(data$STR);data$WOB <- as.numeric(data$WOB)
+data$ALH <- as.numeric(data$ALH);data$BCF <- as.numeric(data$BCF)
+
+data_nprog <- data[which(data$Type=="Rapid"|data$Type=="Medium"),]                                             # Dataset that omits progressive data
+data_prog <- data[which(data$Type=="Rapid Progressive"|data$Type=="Progressive medium"|data$`#points` >31),]   # Or the opposite
+```
+
+```{r}
+# Calculate the correlation matrix
+cor_matrix <- cor(data[, c("VCL", "VSL", "VAP")])
+print(cor_matrix)
+```
+
+```{r}
+# Save data table with all data
+CASA_all_data=data
+# Verify that the directory exists
+if (!dir.exists("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA")) {
+  dir.create("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA", recursive = TRUE)
+}
+
+# Save the data
+#write.csv(CASA_all_data, "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA.csv", quote = FALSE, row.names = FALSE)
+view(CASA_all_data)
+```
+
+```{r}
+# Caclulate means and SDs per male
+CASA_mean_data = data.frame(cbind(aggregate(VCL ~ ID, data=data, FUN=mean)[,1],
+                                         aggregate(VCL ~ ID, data=data, FUN=mean)[,2], aggregate(VCL ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(VSL ~ ID, data=data, FUN=mean)[,2], aggregate(VSL ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(VAP ~ ID, data=data, FUN=mean)[,2], aggregate(VAP ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(LIN ~ ID, data=data, FUN=mean)[,2], aggregate(LIN ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(STR ~ ID, data=data, FUN=mean)[,2], aggregate(STR ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(WOB ~ ID, data=data, FUN=mean)[,2], aggregate(WOB ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(ALH ~ ID, data=data, FUN=mean)[,2], aggregate(ALH ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(BCF ~ ID, data=data, FUN=mean)[,2], aggregate(BCF ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(Field ~ ID, data=data, FUN=max)[,2],aggregate(Field ~ ID, data=data, FUN=length)[,2]))
+
+colnames(CASA_mean_data) = c('Ind_ID','Mean_VCL','SD_VCL','Mean_VSL','SD_VSL','Mean_VAP','SD_VAP','Mean_LIN','SD_LIN',
+                                    'Mean_STR','SD_STR','Mean_WOB','SD_WOB','Mean_ALH','SD_ALH','Mean_BCF','SD_BCF','Fields_used','N_Sperm_tracked')
+```
+
+```{r}
+# Save data table with means
+#write.csv(CASA_mean_data,"/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA.csv",quote=F,row.names=F)
+view(CASA_mean_data)
+```
+# Step 2: Sperm Viability Data Processing
+```{r}
+sperm_viability_raw <- read.csv(file.path(paths$output, "sperm_viability_raw.csv"))
+```
+
+
+```{r}
+# Ensure all columns starting with "g" or "r" are numeric
+sperm_viability <- sperm_viability_raw %>%
+  dplyr::mutate(across(dplyr::starts_with("g"), as.numeric, .names = "g_{col}"),
+                across(dplyr::starts_with("r"), as.numeric, .names = "r_{col}"))
+
+# Calculate Live and Dead Proportions
+sperm_viability <- sperm_viability_raw %>%
+  dplyr::mutate(
+    live_prop = rowSums(dplyr::select(cur_data(), starts_with("g")), na.rm = TRUE) / viability_cells_total,
+    dead_prop = rowSums(dplyr::select(cur_data(), starts_with("r")), na.rm = TRUE) / viability_cells_total
+    )
+
+```
+
+
+```{r}
+view(sperm_viability)
+```
+
+# Step 3: Behavioural Data Processing
+## Step 3a: Time to first interact
+
+```{r}
+# Define file paths
+input_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_raw"  
+output_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_summary"      
+```
+
+```{r}
+# Get list of all CSV files in the input folder
+file_list <- list.files(path = input_folder, pattern = "*.csv", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty list to store individual data frames
+results_list <- list()
+```
+
+```{r}
+# Loop through each file in the list
+for (file in file_list) {
+  # Read the CSV file
+  data <- read.csv(file)
+  
+  # Check if the required columns are present
+  if ("Time" %in% names(data) && "Observation.id" %in% names(data)) {
+    # Ensure Time is numeric
+    data$Time <- as.numeric(data$Time)
+    
+    # Extract Observation id
+    observation_id <- unique(data$Observation.id)  # use unique to handle multiple ids
+    
+    # Compute time to first interaction
+    if (nrow(data) >= 2) {
+      time_to_first_interact <- diff(sort(data$Time))[1]  # Sort Time and take the difference between the first two observations
+    } else {
+      # If fewer than two observations, set time to NA
+      time_to_first_interact <- NA
+    }
+    
+    # Create a data frame for this file
+    results_df <- data.frame(
+      id = observation_id,
+      time_to_first_interact = time_to_first_interact
+    )
+    
+    # Add the data frame to the list
+    results_list[[file]] <- results_df
+  } else {
+    warning(paste("File", file, "does not contain required columns"))
+  }
+}
+```
+
+```{r}
+# Combine all individual data frames into one data frame
+time_to_first_interact <- do.call(rbind, results_list)
+
+# Write the combined data frame to a new CSV file
+#write.csv(behaviour_time_raw, file.path(output_folder, "behaviour_time_raw.csv"), row.names = FALSE)
+
+view(time_to_first_interact)
+```
+
+## Step 3b: Courtship events
+```{r}
+# Define file paths
+input_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_summary"
+output_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis"
+output_file <- file.path(output_folder, "behaviour_summary_raw.csv")
+```
+
+```{r}
+# Get list of all CSV files in the input folder
+file_list <- list.files(path = input_folder, pattern = "*.csv", full.names = TRUE)
+```
+
+
+```{r}
+# Initialize an empty list to store individual data frames
+results_list <- list()
+```
+
+
+```{r}
+# Create a mapping of original to new column names
+col_map <- c(
+  "Observation.id" = "id",
+  "Behavior" = "behaviour",
+  "Total.number.of.occurences" = "occurrences",
+  "Total.duration..s." = "total_duration_sec",
+  "Duration.mean..s." = "mean_duration_sec",
+  "Duration.std.dev" = "duration_std_dev",
+  "inter.event.intervals.mean..s." = "interevent_intervals_mean_sec",
+  "inter.event.intervals.std.dev" = "interevent_intervals_std_dev",
+  "X..of.total.length" = "percentage_total_length",
+  "Modifiers" = "modifier"
+)
+
+for (file in file_list) {
+  # Read the CSV file
+  data <- read.csv(file, stringsAsFactors = FALSE)
+  
+  # Rename columns based on the mapping
+  new_names <- col_map[names(data)]
+  new_names <- ifelse(is.na(new_names), names(data), new_names)  # Keep original names if not in col_map
+  colnames(data) <- new_names
+  
+  # Add missing columns with NA
+  for (col in setdiff(columns_to_keep, names(data))) {
+    data[[col]] <- NA
+  }
+  
+  # Keep only necessary columns
+  data <- data %>% dplyr::select(all_of(columns_to_keep))
+  
+  # Fill missing values in the 'modifier' column with NA
+  data$modifier[data$modifier == ""] <- NA
+  
+  # Add the processed data frame to the list
+  results_list[[file]] <- data
+}
+```
+
+```{r}
+# Combine all individual data frames into one data frame
+courtship <- do.call(rbind, results_list)
+
+# Optionally view the combined data frame
+view(courtship)
+```
+
+```{r}
+# Summarize the data to ensure unique 'tank_batch_id', 'modifier', and 'behaviour' combinations
+courtship_2 <- courtship %>%
+  group_by(id, modifier, behaviour) %>%
+  dplyr::summarize(
+    occurrences = sum(occurrences, na.rm = TRUE),  # Adjust aggregation function as needed
+    total_duration_sec = sum(total_duration_sec, na.rm = TRUE),
+    mean_duration_sec = mean(mean_duration_sec, na.rm = TRUE),
+    duration_std_dev = mean(duration_std_dev, na.rm = TRUE),
+    interevent_intervals_mean_sec = mean(interevent_intervals_mean_sec, na.rm = TRUE),
+    interevent_intervals_std_dev = mean(interevent_intervals_std_dev, na.rm = TRUE),
+    percentage_total_length = mean(percentage_total_length, na.rm = TRUE),
+    .groups = 'drop'  # Ungroup after summarizing
+  )
+```
+
+
+```{r}
+# Pivot the data to wide format
+courtship_3 <- courtship_2 %>%
+  pivot_wider(
+    id_cols = c(id, modifier),  # Include 'modifier' in the identifier columns
+    names_from = behaviour, 
+    names_glue = "{substr(behaviour, 1, 1)}_{.value}", 
+    values_from = c(
+      occurrences, 
+      total_duration_sec, 
+      mean_duration_sec, 
+      duration_std_dev, 
+      interevent_intervals_mean_sec, 
+      interevent_intervals_std_dev, 
+      percentage_total_length
+    )
+  )
+```
+
+```{r}
+courtship <- courtship_3 %>%
+  filter(!(is.na(modifier) | modifier == "None")) %>%
+ # Remove rows where 'modifier' is NA or "None"
+  filter(!(is.na(modifier) | modifier == "None")) %>%
+  # Remove columns with names starting with "a" or "NA"
+  dplyr::select(-starts_with("a"), -starts_with("NA"))
+
+```
+
+```{r}
+view(courtship)
+```
+
+# Step 4: Female Data
+## Step 4a: Gravid Spot (mm^2)
+```{r}
+# Define file paths for the batches
+batch_files <- list.files("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/gravid_spot",
+                          pattern = "batch[1-5]\\.csv$", full.names = TRUE)
+
+# Load and preprocess batches
+batches <- lapply(seq_along(batch_files), function(i) {
+  batch <- read.csv(batch_files[i], stringsAsFactors = FALSE)
+  
+  # Rename and modify columns for specific batches
+  if (i %in% c(2, 3)) {
+    batch <- batch %>%
+      dplyr::rename(Female.ID = Fish.ID) %>%
+      dplyr::mutate(Female.ID = paste0("f", Female.ID))
+  } else if (i == 4) {
+    batch <- batch %>%
+      dplyr::mutate(Female.ID = paste0("f", Female.ID))
+  }
+  
+  # Ensure Female.ID is character and keep unique rows
+  batch %>%
+    dplyr::mutate(Female.ID = as.character(Female.ID)) %>%
+    dplyr::distinct(Female.ID, .keep_all = TRUE)
+})
+
+# Combine all batch data into one data frame
+female_gravid_area <- do.call(rbind, lapply(seq_along(batches), function(i) {
+  batches[[i]] %>%
+    dplyr::select(Female.ID, Area) %>%  # Keep only Female.ID and Area columns 
+    dplyr::rename(area = Area) %>% 
+    dplyr::rename(f_id = Female.ID) %>%      # Rename Female.ID to f_id
+    dplyr::mutate(batch = as.character(i))   # Add a batch column with the batch number
+}))
+
+# View the combined data frame
+view(female_gravid_area)
+```
+
+## Step 4b: Length (mm)
+```{r}
+# Define file paths for the batches
+batch_files <- list.files("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/length",
+                          pattern = "batch[1,2,3,5]\\.csv$", full.names = TRUE)
+# Load and preprocess batches
+batches <- lapply(seq_along(batch_files), function(i) {
+  batch <- read.csv(batch_files[i], stringsAsFactors = FALSE)
+  
+  # Rename and modify columns for specific batches if Fish.ID exists
+  if ("Fish.ID" %in% colnames(batch)) {
+    if (i %in% c(2, 3)) {
+      batch <- batch %>%
+        dplyr::rename(Female.ID = Fish.ID) %>%
+        dplyr::mutate(Female.ID = paste0("f", Female.ID))
+    } else if (i == 4) {
+      batch <- batch %>%
+        dplyr::mutate(Female.ID = paste0("f", Female.ID))
+    }
+  }
+  
+  # Ensure Female.ID is character and keep unique rows
+  batch %>%
+    dplyr::mutate(Female.ID = as.character(Female.ID)) %>%
+    dplyr::distinct(Female.ID, .keep_all = TRUE)
+})
+
+# Combine all batch data into one data frame
+female_length <- do.call(rbind, lapply(seq_along(batches), function(i) {
+  batches[[i]] %>%
+    dplyr::select(Female.ID, Length) %>%  # Keep only Female.ID and Length columns 
+    dplyr::rename(length = Length) %>% 
+    dplyr::rename(f_id = Female.ID) %>%      # Rename Female.ID to f_id
+    dplyr::mutate(batch = as.character(i))   # Add a batch column with the batch number
+}))
+
+# View the combined data frame
+view(female_length)
+```
+
+# Step 5: Merging and Data Integration
+
+Sperm velocity
+Sperm viability
+Sperm morphology
+Sperm concentration
+Courtship behaviour
+Time to first interact
+Female gravid spot size
+Female length
+Male morphology
+
+```{r}
+# Load Additional Datasets
+morph_raw <- read.csv(file.path(base_path, "male_morph_raw.csv"))
+roundsheet <- read.csv(file.path(base_path, "roundsheet_raw.csv"))
+
+hb <- roundsheet %>%
+  # Convert m_id to character type to match Ind_ID_trimmed
+  mutate(m_id = as.character(m_id)) %>%
+  full_join(courtship, by = c("tank_batch_id" = "id")) %>%
+  full_join(time_to_first_interact, by = c("tank_batch_id" = "id")) %>%
+   full_join(
+    sperm_viability %>%
+      mutate(mid_trimmed = substr(mid, 2, nchar(mid))) %>%
+      dplyr::select(live_prop, dead_prop, mid_trimmed),  # Keep only m_id, live_prop, and dead_prop
+    by = c("m_id" = "mid_trimmed")) %>%
+  full_join(
+    CASA_mean_data %>%
+      mutate(Ind_ID_trimmed = substr(Ind_ID, 2, nchar(Ind_ID))), # Remove the first character from Ind_ID
+    by = c("m_id" = "Ind_ID_trimmed")) %>% # Use the new column for matching
+   full_join(
+   morph_raw %>% 
+     dplyr::select(length, id), 
+                    by = c("tank_batch_id" = "id"))
+```
+
+
+```{r}
+view(hb)
+```
+
+
+Replace modifiers with actual female ID
+
+```{r}
+boris_id <- read.csv("boris_id.csv")
+
+# Check the contents of hb_7 and boris_id
+print(head(hb))
+print(head(boris_id))
+```
+
+
+```{r}
+# Perform the join and check the intermediate result
+hb_2 <- hb %>%
+  left_join(boris_id, by = "tank_batch_id")
+
+print(head(hb_2))
+```
+
+
+```{r}
+# Apply the modifier replacement and check the result
+hb_3 <- hb_2 %>%
+  mutate(modifier = case_when(
+    modifier == "F1" ~ F1,
+    modifier == "F2" ~ F2,
+    TRUE ~ modifier
+  )) %>%
+  dplyr::select(-F1, -F2)
+```
+
+
+```{r}
+print(head(hb_3))
+view(hb_3)
+```
+
+
+Add female gravid spot size (big or small)
+
+```{r}
+# Update the dataset
+hb_4 <- hb_3 %>%
+  dplyr::rename(f_id = modifier) %>%  # Rename modifier to f_id
+  dplyr::mutate(f_gravid_size = case_when(
+    f_id %in% f1_big_id ~ "big",      # If f_id appears in f1_big_id, set to 'big'
+    f_id %in% f2_small_id ~ "small",   # If f_id appears in f2_small_id, set to 'small'
+    TRUE ~ NA_character_              # Set to NA if neither condition is met
+  )) %>%
+  dplyr::select(f_id, f_gravid_size, everything())  # Reorder columns to place f_gravid_size next to f_id
+
+hb_5 <- hb_4 %>%
+  filter(!is.na(treatment))
+```
+
+
+```{r}
+view(hb_5)
+```
+
+# Step 6: Checking data
+
+```{r}
+# Directly count unique tank_batch_id values
+unique_tank_batch_count <- n_distinct(hb_5$tank_batch_id)
+
+# Count rows for each tank_batch_id
+row_counts <- hb_5 %>%
+  dplyr::group_by(tank_batch_id) %>%
+  dplyr::summarize(row_count = n(), .groups = 'drop')
+
+# Identify tank_batch_id with counts not equal to 2
+missing_rows <- row_counts %>%
+  dplyr::filter(row_count != 2)
+
+# Print the results
+print(paste("Total unique tank_batch_id values:", length(unique_tank_batch_ids)))
+print(missing_rows)
+```
+
+
+# Old data wrangling (all below)
+### Packages
+
+A list of all the required packages
+
+```{r}
+required_packages <- c("ggplot2", "ggthemes", "ggfortify", "ggridges", "gghalves",
+                       "ggExtra", "corrplot",  # Data visualization
+                       "performance", "see", "patchwork", "qqplotr", "glmmTMB", "DHARMa", "brms", "rstan", "rstantools",                          #Modelling
+                       "datawizard",  # Data manipulation
+                       "tidyverse", "janitor", "readxl", "broom", "data.table", "dplyr", # Data tidy
+                       "ggeffects", "gridExtra", "lme4", "lmerTest", "readr", "EnvStats", "cowplot",
+                       "gridGraphics", "car", "RColorBrewer", "boot", "ICC", "plyr", "writexl","sjPlot",
+                       "Hmisc", "ggpubr", "svglite", "lubridate", "stringr", "reshape", 
+                       "scales", "devtools", "MASS", "pscl", "rcompanion", "stringi")
+```
+
+A function to install and/or load the required package. This should report "All packages loaded" once it has finished loading them. Try running it twice if you do not see this message. 
+
+```{r, message=FALSE, results='hide'}
+loaded_packages <- lapply(required_packages, function(package) {
+  if (!require(package, character.only = TRUE)) {
+    install.packages(package)
+    if (!require(package, character.only = TRUE)) {
+      return(FALSE)
+    }
+  }
+  return(TRUE)
+})
+
+#Check if all packages are loaded successfully
+if (all(unlist(loaded_packages))) {
+  cat("All packages loaded\n")
+} else {
+  cat("Some packages failed to load or install\n")
+}
+```
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(smatr)
+library(RNOmni)
+library(lme4)
+library(car)
+library(lmerTest)
+library(merTools)
+library(MuMIn)
+library(emmeans)
+library(corrplot)
+library(ggthemes)
+library(dplyr) 
+library(tidyr)
+library(brms)
+library(sjPlot)
+```
+### Sperm velocity - Peparing CASA (sperm) data
+
+```{r}
+# Set path and load files 
+# Define the correct path for macOS
+path <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA"
+
+# Normalize the path to correct format
+path <- normalizePath(path)
+
+# Check if the path exists and set the working directory
+if (file.exists(path)) {
+  setwd(path)
+  print(getwd())  # This should print the new working directory if successful
+} else {
+  stop("The specified path does not exist. Please check the path.")
+}
+
+# Now list the Excel files using the normalized path
+excel_files <- list.files(path = path, pattern = ".xls", full.names = TRUE)
+```
+
+```{r}
+# Function to process excel files 
+data_l <- list()
+
+process <- function (file) {
+  file_data <- read_excel(excel_files[file], col_names = FALSE)                        # Read the first file in the folder
+  file_name <- basename(excel_files[file])                                             # Keep track of the name of the file   
+  file_data <- file_data[-c(1:3),]                                                     # Delete the three first useless rows
+  colnames(file_data) <- file_data[1, ]                                                # Change the names of the columns based on the first row
+  file_data <- file_data[-1, ]                                                         # Delete it
+  file_data$ID <- file_name                                                            # Add the name as a variable    
+  return(file_data)
+}
+```
+
+```{r}
+j=0
+for (file in 1:length(excel_files)) {                                                  # Apply the "process" function to each file in the folder
+  j=j+1
+  data_l[[j]] <- process(file)
+}
+```
+
+```{r}
+data <- bind_rows(data_l)                                                              # Bind all the files together
+data <- as.data.frame(data[,c(23,1,7:16)])                                             # Convert into a dataframe and select the variables I am interested in
+data$ID <- substr(data$ID, 1, nchar(data$ID) - 4)                                      # Delete the last 4 characters so ".xls"
+data$ID <- sub(sprintf('([A-Z])([0-9])'), "\\1.\\2", data$ID)                          # Change IDs to correct format
+```
+
+```{r}
+# Change the class of characters
+data$Field <- as.character(data$Field)
+data$VCL <- as.numeric(data$VCL);data$VSL <- as.numeric(data$VSL);data$VAP <- as.numeric(data$VAP)
+data$LIN <- as.numeric(data$LIN);data$STR <- as.numeric(data$STR);data$WOB <- as.numeric(data$WOB)
+data$ALH <- as.numeric(data$ALH);data$BCF <- as.numeric(data$BCF)
+
+data_nprog <- data[which(data$Type=="Rapid"|data$Type=="Medium"),]                                             # Dataset that omits progressive data
+data_prog <- data[which(data$Type=="Rapid Progressive"|data$Type=="Progressive medium"|data$`#points` >31),]   # Or the opposite
+```
+
+```{r}
+# Calculate the correlation matrix
+cor_matrix <- cor(data[, c("VCL", "VSL", "VAP")])
+print(cor_matrix)
+```
+
+```{r}
+# Save data table with all data
+CASA_all_data=data
+# Verify that the directory exists
+if (!dir.exists("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA")) {
+  dir.create("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA", recursive = TRUE)
+}
+
+# Save the data
+write.csv(CASA_all_data, "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA.csv", quote = FALSE, row.names = FALSE)
+view(CASA_all_data)
+```
+
+```{r}
+# Caclulate means and SDs per male
+CASA_mean_data = data.frame(cbind(aggregate(VCL ~ ID, data=data, FUN=mean)[,1],
+                                         aggregate(VCL ~ ID, data=data, FUN=mean)[,2], aggregate(VCL ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(VSL ~ ID, data=data, FUN=mean)[,2], aggregate(VSL ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(VAP ~ ID, data=data, FUN=mean)[,2], aggregate(VAP ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(LIN ~ ID, data=data, FUN=mean)[,2], aggregate(LIN ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(STR ~ ID, data=data, FUN=mean)[,2], aggregate(STR ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(WOB ~ ID, data=data, FUN=mean)[,2], aggregate(WOB ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(ALH ~ ID, data=data, FUN=mean)[,2], aggregate(ALH ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(BCF ~ ID, data=data, FUN=mean)[,2], aggregate(BCF ~ ID, data=data, FUN=sd)[,2],
+                                         aggregate(Field ~ ID, data=data, FUN=max)[,2],aggregate(Field ~ ID, data=data, FUN=length)[,2]))
+
+colnames(CASA_mean_data) = c('Ind_ID','Mean_VCL','SD_VCL','Mean_VSL','SD_VSL','Mean_VAP','SD_VAP','Mean_LIN','SD_LIN',
+                                    'Mean_STR','SD_STR','Mean_WOB','SD_WOB','Mean_ALH','SD_ALH','Mean_BCF','SD_BCF','Fields_used','N_Sperm_tracked')
+```
+
+```{r}
+# Save data table with means
+write.csv(CASA_mean_data,"/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_velocity_CASA.csv",quote=F,row.names=F)
+view(CASA_mean_data)
+```
+### Behaviour - Preparing BORIS files 
+### Time to first interact
+```{r}
+# Define file paths
+input_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_raw"  
+output_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_summary"      
+```
+
+```{r}
+# Get list of all CSV files in the input folder
+file_list <- list.files(path = input_folder, pattern = "*.csv", full.names = TRUE)
+```
+
+```{r}
+# Initialize an empty list to store individual data frames
+results_list <- list()
+```
+
+```{r}
+# Loop through each file in the list
+for (file in file_list) {
+  # Read the CSV file
+  data <- read.csv(file)
+  
+  # Check if the required columns are present
+  if ("Time" %in% names(data) && "Observation.id" %in% names(data)) {
+    # Ensure Time is numeric
+    data$Time <- as.numeric(data$Time)
+    
+    # Extract Observation id
+    observation_id <- unique(data$Observation.id)  # use unique to handle multiple ids
+    
+    # Compute time to first interaction
+    if (nrow(data) >= 2) {
+      time_to_first_interact <- diff(sort(data$Time))[1]  # Sort Time and take the difference between the first two observations
+    } else {
+      # If fewer than two observations, set time to NA
+      time_to_first_interact <- NA
+    }
+    
+    # Create a data frame for this file
+    results_df <- data.frame(
+      id = observation_id,
+      time_to_first_interact = time_to_first_interact
+    )
+    
+    # Add the data frame to the list
+    results_list[[file]] <- results_df
+  } else {
+    warning(paste("File", file, "does not contain required columns"))
+  }
+}
+```
+
+```{r}
+# Combine all individual data frames into one data frame
+behaviour_time_raw <- do.call(rbind, results_list)
+
+# Write the combined data frame to a new CSV file
+write.csv(behaviour_time_raw, file.path(output_folder, "behaviour_time_raw.csv"), row.names = FALSE)
+
+# View the combined data frame
+print(behaviour_time_raw)
+```
+
+### Courtship events
+```{r}
+# Define file paths
+input_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/behaviour_BORIS/BORIS_halfbeaks_summary"
+output_folder <- "/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis"
+output_file <- file.path(output_folder, "behaviour_summary_raw.csv")
+```
+
+```{r}
+# Get list of all CSV files in the input folder
+file_list <- list.files(path = input_folder, pattern = "*.csv", full.names = TRUE)
+```
+
+
+```{r}
+# Initialize an empty list to store individual data frames
+results_list <- list()
+```
+
+
+```{r}
+# Create a mapping of original to new column names
+col_map <- c(
+  "Observation.id" = "id",
+  "Behavior" = "behaviour",
+  "Total.number.of.occurences" = "occurrences",
+  "Total.duration..s." = "total_duration_sec",
+  "Duration.mean..s." = "mean_duration_sec",
+  "Duration.std.dev" = "duration_std_dev",
+  "inter.event.intervals.mean..s." = "interevent_intervals_mean_sec",
+  "inter.event.intervals.std.dev" = "interevent_intervals_std_dev",
+  "X..of.total.length" = "percentage_total_length",
+  "Modifiers" = "modifier"
+)
+
+# Loop through each file and process it
+for (file in file_list) {
+  # Read the CSV file
+  data <- read.csv(file, stringsAsFactors = FALSE)
+  
+  # Rename columns based on the mapping
+  new_names <- col_map[names(data)]
+  new_names <- ifelse(is.na(new_names), names(data), new_names)  # Keep original names if not in col_map
+  colnames(data) <- new_names
+  
+  # Remove columns that are not needed
+  columns_to_keep <- c("id", "behaviour", "occurrences", "total_duration_sec", 
+                        "mean_duration_sec", "duration_std_dev", 
+                        "interevent_intervals_mean_sec", "interevent_intervals_std_dev", 
+                        "percentage_total_length", "modifier")
+  data <- data %>% dplyr::select(all_of(columns_to_keep))
+  
+  # Fill missing values in the 'modifier' column with NA
+  data$modifier[data$modifier == ""] <- NA
+  
+  # Add the processed data frame to the list
+  results_list[[file]] <- data
+}
+```
+
+
+```{r}
+# Combine all individual data frames into one data frame
+combined_df <- do.call(rbind, results_list)
+
+# Optionally view the combined data frame
+view(combined_df)
+```
+
+Here I am combining my roundsheet, morphology, behaviour and sperm data into a new file called "hb".
+
+
+```{r}
+# Read in the data
+morph_raw <- read.csv("male_morph_raw.csv")
+roundsheet <- read.csv("roundsheet_raw.csv")
+sprm_raw <- read.csv("sperm_velocity_casa.csv")
+beh1_raw  <- read.csv("behaviour_summary_raw.csv")
+beh2_raw  <- read.csv("behaviour_time_raw.csv")
+```
+
+
+```{r}
+# Perform a full join between roundsheet and morph_raw on "id"
+merged_data <- full_join(roundsheet, morph_raw[, c("id", "length")], by = c("tank_batch_id" = "id"))
+```
+
+
+```{r}
+# Prepare sprm_raw by creating a new column "m_id_match" to match with "m_id" from behaviour_raw
+sprm_raw <- sprm_raw %>%
+  mutate(m_id_match = as.character(substring(Ind_ID, 2))) # Convert to character
+```
+
+
+```{r}
+# Convert m_id to character in merged_data
+merged_data <- merged_data %>%
+  mutate(m_id = as.character(m_id))
+```
+
+
+```{r}
+# Perform a full outer join with sprm_raw
+merged_data <- full_join(merged_data, sprm_raw[, !names(sprm_raw) %in% "Ind_ID"], by = c("m_id" = "m_id_match"))
+```
+
+
+```{r}
+# Add time_to_first_interact from beh2_raw
+merged_data <- full_join(merged_data, beh2_raw[, c("id", "time_to_first_interact")], by = c("tank_batch_id" = "id"))
+```
+
+
+```{r}
+# Add all columns from beh1_raw
+merged_data <- full_join(merged_data, beh1_raw, by = c("tank_batch_id" = "id"))
+```
+
+
+```{r}
+# Optionally, drop the intermediate column "m_id_match" and "notes"
+hb <- merged_data[, !(names(merged_data) %in% c("m_id_match", "notes"))]
+
+# Rename the column 'length' to 'length_mm'
+names(hb)[names(hb) == "length"] <- "length_mm"
+
+# Convert all column names to lowercase
+names(hb) <- tolower(names(hb))
+
+print(hb)
+#view(hb)
+```
+
+###Checking no data was missed when combining datasets (should be 76 unique values of "tank_batch_id")
+```{r}
+# Directly count unique tank_batch_id values
+unique_tank_batch_count <- n_distinct(hb$tank_batch_id)
+
+# Print the result
+print(unique_tank_batch_count)
+```
+
+###Pivot behaviour data
+
+```{r}
+# Assuming your dataset is called hb
+hb_2 <- hb %>%
+  filter(behaviour != "acclim")
+```
+
+```{r}
+# Summarize the data to ensure unique 'tank_batch_id', 'modifier', and 'behaviour' combinations
+hb_3 <- hb_2 %>%
+  group_by(tank_batch_id, modifier, behaviour) %>%
+  dplyr::summarize(
+    occurrences = sum(occurrences, na.rm = TRUE),  # Adjust aggregation function as needed
+    total_duration_sec = sum(total_duration_sec, na.rm = TRUE),
+    mean_duration_sec = mean(mean_duration_sec, na.rm = TRUE),
+    duration_std_dev = mean(duration_std_dev, na.rm = TRUE),
+    interevent_intervals_mean_sec = mean(interevent_intervals_mean_sec, na.rm = TRUE),
+    interevent_intervals_std_dev = mean(interevent_intervals_std_dev, na.rm = TRUE),
+    percentage_total_length = mean(percentage_total_length, na.rm = TRUE),
+    .groups = 'drop'  # Ungroup after summarizing
+  )
+```
+
+
+```{r}
+# Pivot the data to wide format
+hb_4 <- hb_3 %>%
+  pivot_wider(
+    id_cols = c(tank_batch_id, modifier),  # Include 'modifier' in the identifier columns
+    names_from = behaviour, 
+    names_glue = "{substr(behaviour, 1, 1)}_{.value}", 
+    values_from = c(
+      occurrences, 
+      total_duration_sec, 
+      mean_duration_sec, 
+      duration_std_dev, 
+      interevent_intervals_mean_sec, 
+      interevent_intervals_std_dev, 
+      percentage_total_length
+    )
+  )
+```
+
+
+```{r}
+# Check the resulting data
+print(hb_4)
+#view(hb_4)
+```
+
+###Getting rid of NA rows
+```{r}
+# Remove rows where 'modifier' is NA
+hb_5 <- hb_4 %>%
+  filter(!is.na(modifier))
+```
+
+
+```{r}
+# Check the resulting data
+print(hb_5)
+#view(hb_5)
+```
+
+```{r}
+# Directly count unique tank_batch_id values
+unique_tank_batch_count <- n_distinct(hb_5$tank_batch_id)
+
+# Print the result
+print(unique_tank_batch_count)
+```
+###Finding which ids are now missing
+```{r}
+# Extract unique tank_batch_id values from the original and filtered datasets
+original_ids <- hb_4 %>%
+  pull(tank_batch_id) %>%
+  unique()
+
+filtered_ids <- hb_5 %>%
+  pull(tank_batch_id) %>%
+  unique()
+```
+
+
+```{r}
+# Identify missing tank_batch_id values
+missing_ids <- setdiff(original_ids, filtered_ids)
+
+# Print missing tank_batch_id values
+print(missing_ids)
+```
+
+```{r}
+# List 1 (original)
+list1 <- c("g1_4_55", "g3_5_81", "g5_3_47", "g5_3_54", "r5_4_65", "r8_3_53", "y10_5_76", "y2_1_12", "y5_3_52", "y8_4_59", "y8_4_63", "y9_3_43")
+
+# List 2 (filtered)
+list2 <- c("y2_1_12", "y9_3_43", "g5_3_47", "y5_3_52", "r8_3_53", "g5_3_54", "g1_4_55", "y8_4_63", "r5_4_65", "y10_5_76", "g3_5_81")
+
+# Find missing IDs in list1 compared to list2
+missing_from_list2 <- setdiff(list1, list2)
+
+# Find missing IDs in list2 compared to list1
+missing_from_list1 <- setdiff(list2, list1)
+
+# Print results
+print("Missing from List 2:")
+print(missing_from_list2)
+
+print("Missing from List 1:")
+print(missing_from_list1)
+```
+###Add these missing males back into the dataframe and filling with NAs
+```{r}
+# Define the tank_batch_id values to add
+new_ids <- c("g1_4_55", "g3_5_81", "g5_3_47", "g5_3_54", "r5_4_65", "r8_3_53", 
+             "y10_5_76", "y2_1_12", "y5_3_52", "y8_4_59", "y8_4_63", "y9_3_43")
+```
+
+
+```{r}
+# Create a new data frame with these tank_batch_id values and modifiers 'f1' and 'f2'
+new_rows <- expand.grid(
+  tank_batch_id = new_ids,
+  modifier = c("F1", "F2"),
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+# Add NA values for all other columns. Use the same column names as in hb_5.
+other_columns <- setdiff(names(hb_5), c("tank_batch_id", "modifier"))
+new_rows[other_columns] <- NA
+```
+
+
+```{r}
+# Combine with the existing hb_wide_filtered data
+hb_6 <- bind_rows(hb_5, new_rows)
+
+# Check the resulting data
+print(hb_6)
+#View(hb_6)
+```
+
+###Add missing females
+```{r}
+# Identify all unique tank_batch_id values
+unique_ids <- hb_6 %>%
+  dplyr::pull(tank_batch_id) %>%
+  unique()
+```
+
+
+```{r}
+# Create a data frame with all combinations of tank_batch_id and F1/F2
+all_combinations <- expand.grid(
+  tank_batch_id = unique_ids,
+  modifier = c("F1", "F2"),
+  stringsAsFactors = FALSE
+)
+```
+
+
+```{r}
+# Identify which tank_batch_id have both F1 and F2
+existing_modifiers <- hb_6 %>%
+  dplyr::select(tank_batch_id, modifier) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(tank_batch_id) %>%
+  dplyr::summarise(
+    has_F1 = any(modifier == "F1"),
+    has_F2 = any(modifier == "F2"),
+    .groups = 'drop'
+  )
+```
+
+
+```{r}
+# Identify tank_batch_id that are missing F1 or F2
+missing_modifiers <- existing_modifiers %>%
+  dplyr::filter(!(has_F1 & has_F2)) %>%
+  dplyr::select(tank_batch_id)
+```
+
+
+```{r}
+# Create missing rows for tank_batch_id that are missing F1 or F2
+missing_rows <- all_combinations %>%
+  dplyr::semi_join(missing_modifiers, by = "tank_batch_id") %>%
+  dplyr::anti_join(hb_6, by = c("tank_batch_id", "modifier")) %>%
+  dplyr::mutate(dplyr::across(-c(tank_batch_id, modifier), ~ NA_real_))
+```
+
+
+```{r}
+# Combine with the existing data
+hb_7 <- dplyr::bind_rows(hb_6, missing_rows) %>%
+  dplyr::distinct()
+
+# Check the resulting data
+print(hb_7)
+#View(hb_7)
+```
+
+###Checking if every male has 2 rows
+```{r}
+# Count the number of rows per 'tank_batch_id'
+tank_batch_id_counts <- hb_7 %>%
+  group_by(tank_batch_id) %>%
+  tally() %>%
+  ungroup()
+```
+
+
+```{r}
+# Identify 'tank_batch_id' that do not have exactly 2 rows
+tank_batch_ids_not_2_rows <- tank_batch_id_counts %>%
+  filter(n != 2)
+
+# Check the resulting 'tank_batch_id' that do not have exactly 2 rows
+print(tank_batch_ids_not_2_rows)
+```
+
+###Replacing female ids
+  Replacing modifiers with actual id
+  
+```{r}
+boris_id <- read.csv("boris_id.csv")
+
+# Check the contents of hb_7 and boris_id
+print(head(hb_7))
+print(head(boris_id))
+```
+
+
+```{r}
+# Perform the join and check the intermediate result
+hb_joined <- hb_7 %>%
+  left_join(boris_id, by = "tank_batch_id")
+
+print(head(hb_joined))
+```
+
+
+```{r}
+# Apply the modifier replacement and check the result
+hb_8 <- hb_joined %>%
+  mutate(modifier = case_when(
+    modifier == "F1" ~ F1,
+    modifier == "F2" ~ F2,
+    TRUE ~ modifier
+  )) %>%
+  dplyr::select(-F1, -F2)
+
+print(head(hb_8))
+#view(hb_8)
+```
+###Fill missing modifiers with NA
+```{r}
+# Ensure the correct modifier assignment and replace blanks with NA
+hb_9 <- hb_joined %>%
+  mutate(modifier = case_when(
+    modifier == "F1" ~ F1,
+    modifier == "F2" ~ F2,
+    TRUE ~ modifier
+  )) %>%
+  # Replace blank modifiers with NA
+  mutate(modifier = na_if(modifier, "")) %>%
+  dplyr::select(-F1, -F2)
+```
+
+
+```{r}
+# Filter out the specific tank_batch_id
+hb_r8_3_53 <- hb_9 %>%
+  filter(tank_batch_id == "r8_3_53")
+```
+
+
+```{r}
+# Update the modifier column to NA where needed
+hb_r8_3_53_updated <- hb_r8_3_53 %>%
+  mutate(modifier = ifelse(is.na(modifier) | modifier == "", NA_character_, modifier))
+
+#view(hb_9)
+```
+###Merge behavioural data with round sheet
+```{r}
+# Create additional rows in roundsheet for each tank_batch_id in hb_9
+# Ensure that roundsheet has rows for each tank_batch_id in hb_9 with the appropriate number of modifiers
+
+# Create a data frame with all unique tank_batch_id from hb_9
+expanded_roundsheet <- hb_9 %>%
+  dplyr::select(tank_batch_id, modifier) %>%
+  dplyr::distinct() %>%
+  dplyr::full_join(roundsheet, by = "tank_batch_id")
+```
+
+
+```{r}
+# Merge the expanded roundsheet with hb_3
+hb_10 <- expanded_roundsheet %>%
+  dplyr::full_join(hb_9, by = c("tank_batch_id", "modifier"))
+```
+
+
+```{r}
+# Print results to check
+print(hb_10)
+#view(hb_10)
+```
+###Adding new column for female gravid spot size (big or small)
+
+```{r}
+# Update the dataset
+hb_11 <- hb_10 %>%
+  dplyr::rename(f_id = modifier) %>%  # Rename modifier to f_id
+  dplyr::mutate(f_gravid_size = case_when(
+    f_id %in% f1_big_id ~ "big",      # If f_id appears in f1_big_id, set to 'big'
+    f_id %in% f2_small_id ~ "small",   # If f_id appears in f2_small_id, set to 'small'
+    TRUE ~ NA_character_              # Set to NA if neither condition is met
+  )) %>%
+  dplyr::select(f_id, f_gravid_size, everything())  # Reorder columns to place f_gravid_size next to f_id
+```
+
+
+```{r}
+# Print results to check
+print(hb_11)
+#view(hb_11)
+```
+###Merge with casa
+```{r}
+# Prepare the datasets for merging
+# Remove the first letter from Ind_ID in sprm_raw
+sprm_raw_prepared <- sprm_raw %>%
+  dplyr::mutate(modified_Ind_ID = stringr::str_sub(Ind_ID, 2, stringr::str_length(Ind_ID)))  # Remove the first letter
+```
+
+
+```{r}
+# Convert m_id in hb_11 to character to match modified_Ind_ID in sprm_raw_prepared
+hb_12 <- hb_11 %>%
+  dplyr::mutate(m_id = as.character(m_id))
+```
+
+
+```{r}
+# Merge updated_data with sprm_raw_prepared based on the modified Ind_ID and m_id
+hb_13 <- hb_12 %>%
+  dplyr::left_join(sprm_raw_prepared, by = c("m_id" = "modified_Ind_ID"))  # Perform the merge
+```
+
+
+```{r}
+# Print results to check
+print(hb_13)
+```
+###Merge with length
+```{r}
+# Prepare morph_raw by ensuring that id is of the same type as tank_batch_id and renaming length to length_mm
+morph_raw_prepared <- morph_raw %>%
+  dplyr::rename(tank_batch_id = id, length_mm = length)  # Rename id to tank_batch_id and length to length_mm
+```
+
+
+```{r}
+# Perform the join to add the length_mm column
+hb_14 <- hb_13 %>%
+  dplyr::left_join(morph_raw_prepared %>% dplyr::select(tank_batch_id, length_mm), 
+                   by = "tank_batch_id")  # Add length_mm from morph_raw
+```
+
+
+```{r}
+# Print results to check
+print(hb_14)
+```
+###Merge with Boris time to
+```{r}
+# Prepare beh2_raw by renaming the column time_to_first_interact to time_to_first_interact_sec
+beh2_raw_prepared <- beh2_raw %>%
+  dplyr::rename(time_to_first_interact_sec = time_to_first_interact)  # Rename the column
+```
+
+
+```{r}
+# Perform the join to add the time_to_first_interact_sec column
+hb_15 <- hb_14 %>%
+  dplyr::left_join(beh2_raw_prepared %>% dplyr::select(id, time_to_first_interact_sec), 
+                   by = c("tank_batch_id" = "id"))  # Add time_to_first_interact_sec from beh2_raw
+```
+
+
+```{r}
+# Print results to check
+print(hb_15)
+#view(hb_15)
+```
+###Adjusting
+
+```{r}
+# Convert all column names to lowercase
+hb_16 <- hb_15 %>%
+  dplyr::rename_all(tolower)  # Rename all columns to lowercase
+```
+
+
+```{r}
+# Remove columns f1_big_id and f2_small_id
+hb_17 <- hb_16 %>%
+  dplyr::select(-f1_big_id, -f2_small_id)  # Remove specified columns
+```
+
+
+```{r}
+# Print results to check
+print(hb_17)
+```
+
+```{r}
+# Add a new column "occurrences" which is the sum of m_occurrences, s_occurrences, and o_occurrences
+hb_17$total_occurrences <- rowSums(hb_17[, c("m_occurrences", "s_occurrences", "o_occurrences")], na.rm = TRUE)
+```
+
+###Final check
+```{r}
+# Filter the row to be duplicated
+row_to_duplicate <- hb_17 %>%
+  dplyr::filter(tank_batch_id == "r9_2_26")
+```
+
+
+```{r}
+# Remove existing rows for tank_batch_id "r9_2_26" to prevent excess rows
+hb_18 <- hb_17 %>%
+  dplyr::filter(tank_batch_id != "r9_2_26")
+```
+
+
+```{r}
+# Combine the corrected dataset with exactly two copies of the row to duplicate
+hb_19 <- hb_18 %>%
+  dplyr::bind_rows(row_to_duplicate, row_to_duplicate) %>%
+  dplyr::arrange(tank_batch_id)  # Optional: Arrange to see the rows clearly
+```
+
+
+```{r}
+# Check the number of unique tank_batch_id values
+unique_tank_batch_ids <- hb_19 %>%
+  dplyr::pull(tank_batch_id) %>%
+  unique()
+
+# Count rows for each tank_batch_id
+row_counts <- hb_19 %>%
+  dplyr::group_by(tank_batch_id) %>%
+  dplyr::summarize(row_count = n(), .groups = 'drop')
+
+# Identify tank_batch_id with counts not equal to 2
+missing_rows <- row_counts %>%
+  dplyr::filter(row_count != 2)
+
+# Print the results
+print(paste("Total unique tank_batch_id values:", length(unique_tank_batch_ids)))
+print(missing_rows)
+```
+
+```{r}
+#fill any NAs with 0
+hb_19$m_occurrences[is.na(hb_19$m_occurrences)] <- 0
+hb_19$s_occurrences[is.na(hb_19$s_occurrences)] <- 0
+hb_19$o_occurrences[is.na(hb_19$o_occurrences)] <- 0
+```
+
+```{r}
+view(hb_19)
+#write.csv(hb_19,"/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/hb_19.csv",quote=F,row.names=F)
+```
+## Adding female gravid spot size (issue about reusing)
+```{r}
+# Load the batch data
+batch1 <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/batch1.csv", stringsAsFactors = FALSE)
+batch2 <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/batch2.csv", stringsAsFactors = FALSE)
+batch3 <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/batch3.csv", stringsAsFactors = FALSE)
+batch4 <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/batch4.csv", stringsAsFactors = FALSE)
+batch5 <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/female_morph/batch5.csv", stringsAsFactors = FALSE)
+```
+
+
+```{r}
+# Assuming the column to rename is actually 'FISH.ID'
+batch2 <- batch2 %>%
+  dplyr::rename(Female.ID = Fish.ID) %>%    # Rename FISH.ID to Female.ID
+  dplyr::mutate(Female.ID = paste0("f", Female.ID)) # Add "f" in front of each value
+
+# Assuming the column to rename is actually 'FISH.ID'
+batch3 <- batch3 %>%
+  dplyr::rename(Female.ID = Fish.ID) %>%    # Rename FISH.ID to Female.ID
+  dplyr::mutate(Female.ID = paste0("f", Female.ID)) # Add "f" in front of each value
+
+# Assuming the column to rename is actually 'FISH.ID'
+batch4 <- batch4 %>%
+  dplyr::mutate(Female.ID = paste0("f", Female.ID)) # Add "f" in front of each value
+```
+
+
+```{r}
+# Ensure f_id and Female.ID are the same type (e.g., both character or both numeric)
+hb_19$f_id <- as.character(hb_19$f_id)
+batch1$Female.ID <- as.character(batch1$Female.ID)
+batch2$Female.ID <- as.character(batch2$Female.ID)
+batch3$Female.ID <- as.character(batch3$Female.ID)
+batch4$Female.ID <- as.character(batch4$Female.ID)
+batch5$Female.ID <- as.character(batch5$Female.ID)
+```
+
+```{r}
+# Ensure batches have unique rows by Female.ID
+batch1_unique <- batch1 %>% distinct(Female.ID, .keep_all = TRUE)
+batch2_unique <- batch2 %>% distinct(Female.ID, .keep_all = TRUE)
+batch3_unique <- batch3 %>% distinct(Female.ID, .keep_all = TRUE)
+batch4_unique <- batch4 %>% distinct(Female.ID, .keep_all = TRUE)
+batch5_unique <- batch5 %>% distinct(Female.ID, .keep_all = TRUE)
+```
+
+```{r}
+hb_20 <- hb_19 %>%
+  dplyr::full_join(batch1_unique[, c("Female.ID", "Area")], by = c("f_id" = "Female.ID")) %>%
+  dplyr::rename(gravid_area_batch1 = Area) %>%
+  dplyr::full_join(batch2_unique[, c("Female.ID", "Area")], by = c("f_id" = "Female.ID")) %>%
+  dplyr::rename(gravid_area_batch2 = Area) %>%
+  dplyr::full_join(batch3_unique[, c("Female.ID", "Area")], by = c("f_id" = "Female.ID")) %>%
+  dplyr::rename(gravid_area_batch3 = Area) %>%
+  dplyr::full_join(batch4_unique[, c("Female.ID", "Area")], by = c("f_id" = "Female.ID")) %>%
+  dplyr::rename(gravid_area_batch4 = Area) %>%
+  dplyr::full_join(batch5_unique[, c("Female.ID", "Area")], by = c("f_id" = "Female.ID")) %>%
+  dplyr::rename(gravid_area_batch5 = Area) %>%
+  dplyr::distinct() # Remove any remaining duplicate rows
+
+# Check the result to ensure the new columns have been added
+view(hb_20)
+```
+## Adding sperm viability
+```{r}
+sperm_viability_raw <- read.csv("/Users/shihoozeki/Desktop/PhD/Thesis/Chapter 3 - Half-beaks/Data analysis/sperm_viability_raw.csv")
+```
+
+```{r}
+sperm_viability_1 <- sperm_viability_raw %>%
+  # Create the live_prop column by summing all columns starting with 'g' and dividing by 'viability_cells_total'
+  dplyr::mutate(
+    live_prop = rowSums(dplyr::select(., starts_with("g")), na.rm = TRUE) / .[['viability_cells_total']],
+    # Create the dead_prop column by summing all columns starting with 'r' and dividing by 'viability_cells_total'
+    dead_prop = rowSums(dplyr::select(., starts_with("r")), na.rm = TRUE) / .[['viability_cells_total']]
+  )
+```
+
+```{r}
+# Create a temporary column in sperm_viability_raw for the match
+sperm_viability_2 <- sperm_viability_1 %>%
+  mutate(trimmed_mid = substr(mid, 2, nchar(mid))) # Remove the first character from mid
+```
+
+
+```{r}
+# Perform the join with proper suffixes and selecting necessary columns
+hb_21 <- hb_20 %>%
+  left_join(
+    sperm_viability_2 %>%
+      dplyr::select(trimmed_mid, live_prop, dead_prop),   # Select only necessary columns
+    by = c("m_id" = "trimmed_mid")
+  )
+
+# View the resulting dataframe
+view(hb_21)
+```
+
